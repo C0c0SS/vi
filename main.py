@@ -1,17 +1,10 @@
 import time
 from playwright.sync_api import sync_playwright
 import requests
-from random import randint
-import random
-import string
-import names
-import re
 import json
 from discord import Embed, File, SyncWebhook
 from pystyle import *
 import os
-import argparse
-import logging
 from assets.banner import *
 import datetime
 
@@ -24,6 +17,12 @@ pred = Col.StaticMIX([Col.red, Col.red])
 def stage(text: str, symbol: str = '...') -> str:
     ppred = pred if symbol == '...' else Col.red
     return f""" {Col.Symbol(symbol, ppred, Col.blue)} {ppred}{text}{Col.reset}"""
+
+green = Col.StaticMIX([Col.green, Col.light_green])  # Dégradé vert clair
+dark_green = Col.StaticMIX([Col.dark_green, Col.green])  # Dégradé vert foncé
+def stage3(text: str, symbol: str = '...') -> str:
+    pgreen = green if symbol == '...' else Col.light_green  # Utilisation de vert clair pour le texte
+    return f""" {Col.Symbol(symbol, dark_green, Col.green)} {pgreen}{text}{Col.reset}"""
 
 pink = Col.StaticMIX([Col.red, Col.pink])
 def stage1(text: str, symbol: str = '...') -> str:
@@ -42,10 +41,10 @@ def load_filters(file_path='assets/filters.json'):
         data = json.load(f)
         
     # Extraire uniquement les URLs de chaque filtre
-    filters_urls = [filter_item['url'] for filter_item in data['filters']]
+    filters_urls = [{'name': filter_item['name'], 'url': filter_item['url']} for filter_item in data['filters']]
     return filters_urls
 
-def check_new_items(url, cookies, seen_item_ids):
+def check_new_items(url, cookies, seen_item_ids, filter_name):
     """Vérifie les nouveaux articles pour un filtre donné."""
     headers = {
         'User-Agent': user_agent,
@@ -76,10 +75,10 @@ def check_new_items(url, cookies, seen_item_ids):
                             added_date = item.get('created_at_ts', None)  # Timestamp de l'ajout
 
                             # Convertir le timestamp en date lisible si disponible
-                            added_date_str = datetime.fromtimestamp(added_date).strftime('%Y-%m-%d %H:%M:%S') if added_date else 'Date non disponible'
+                            added_date_str = datetime.datetime.fromtimestamp(added_date).strftime('%Y-%m-%d %H:%M:%S') if added_date else 'Date non disponible'
                             
-                            print(f"NOUVEL ARTICLE : {title}, Prix : {price} EUR, ID : {item_id}, Date d'ajout : {added_date_str}")
-                            
+                            NOUVEL_ARTICLE = stage3(f"{title}, Prix : {price} EUR, ID : {item_id}, Filtre : {filter_name} {Col.pink} {Col.reset}", "NOUVEL ARTICLE")
+                            print(NOUVEL_ARTICLE.replace('"', '').replace("'", ""))
                             seen_item_ids.add(item_id)  # Ajouter l'article à la liste des vus
                 else:
                     print("Aucun article trouvé.")
@@ -93,14 +92,15 @@ def check_new_items(url, cookies, seen_item_ids):
 
 def requests_to_vinted(cookies, filters):
     """Vérifie en boucle les nouveaux articles pour chaque filtre dans une boucle infinie."""
-    seen_items_per_filter = {url: set() for url in filters}
+    seen_items_per_filter = {filter_item['url']: set() for filter_item in filters}
 
     while True:
-        for url in filters:
-            check_new_items(url, cookies, seen_items_per_filter[url])
+        for filter_item in filters:
+            url = filter_item['url']
+            filter_name = filter_item['name']
+            check_new_items(url, cookies, seen_items_per_filter[url], filter_name)
             time.sleep(0.5)  # Intervalle de 2 secondes entre les vérifications pour chaque filtre
 
-        
         time.sleep(0.5)  # Pause de 10 secondes avant de vérifier de nouveau tous les filtres
 
 def main():
