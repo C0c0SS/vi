@@ -2,9 +2,7 @@ import time
 from playwright.sync_api import sync_playwright
 import requests
 import json
-from discord import Embed, File, SyncWebhook
 from pystyle import *
-import os
 from assets.banner import *
 import datetime
 
