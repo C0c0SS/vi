@@ -6,3 +6,4 @@ Vintoo is a simple Vinted bot to find the best deals on items for you.
 - **full modifiable**
 - **Easy to use**
 - **Quick use**
+ discord : yami_off
