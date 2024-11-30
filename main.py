@@ -236,7 +236,7 @@ def get_transaction_id(item_id, token):
             # Extrait la partie contenant 'checkout?transaction_id'
             if 'checkout?transaction_id' in internal_url:
                 transaction_part = internal_url.split('checkout?transaction_id=')[-1]
-                transaction_print = stage3(f"Transaction id récupérer avec succés ! {Col.pink} {Col.reset}", {transaction_part})
+                transaction_print = stage3(f"Transaction id récupérer avec succés ! {Col.pink} {Col.reset}", transaction_part)
                 print(transaction_print.replace('"', '').replace("'", ""))
     else : 
         print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
