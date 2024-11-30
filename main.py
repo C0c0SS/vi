@@ -144,6 +144,7 @@ def check_new_items(url, cookies, seen_items_list, filter_name, token):
         elif response.status_code == 429:
             rate_limited_print = stage(f"Vous êtes rate limit !  {Col.pink} {Col.reset}", "!")
             print(rate_limited_print.replace('"', '').replace("'", "")) 
+            exit()
         else:
             print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
             print(response.text)
