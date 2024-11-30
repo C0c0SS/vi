@@ -141,6 +141,9 @@ def check_new_items(url, cookies, seen_items_list, filter_name, token):
                             get_transaction_id(new_item["id"], token)
             except json.JSONDecodeError:
                 print(f"[ERREUR] Décodage JSON échoué pour le filtre : {filter_name}")
+        elif response.status_code == 429:
+            rate_limited_print = stage(f"Vous êtes rate limit !  {Col.pink} {Col.reset}", "!")
+            print(rate_limited_print.replace('"', '').replace("'", "")) 
         else:
             print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
             print(response.text)
@@ -232,7 +235,7 @@ def get_transaction_id(item_id, token):
             # Extrait la partie contenant 'checkout?transaction_id'
             if 'checkout?transaction_id' in internal_url:
                 transaction_part = internal_url.split('checkout?transaction_id=')[-1]
-                transaction_print = stage3(f"Transaction id succesfully recupered ! {Col.pink} {Col.reset}", {transaction_part})
+                transaction_print = stage3(f"Transaction id récupérer avec succés ! {Col.pink} {Col.reset}", {transaction_part})
                 print(transaction_print.replace('"', '').replace("'", ""))
     else : 
         print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
