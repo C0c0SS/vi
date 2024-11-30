@@ -142,8 +142,10 @@ def check_new_items(url, cookies, seen_items_list, filter_name, token):
             except json.JSONDecodeError:
                 print(f"[ERREUR] Décodage JSON échoué pour le filtre : {filter_name}")
         elif response.status_code == 429:
-            rate_limited_print = stage(f"Vous êtes rate limit !  {Col.pink} {Col.reset}", "!")
+            rate_limited_print = stage(f"Vous êtes temporairement limité en raisons d'un grands nombres de requêtes ! {Col.pink} {Col.reset}", "!")
             print(rate_limited_print.replace('"', '').replace("'", "")) 
+            proxy_print = stage(f"Veuillez utiliser des proxys !{Col.pink} {Col.reset}", "!")
+            print(proxy_print.replace('"', '').replace("'", ""))  
             
         else:
             print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
