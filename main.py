@@ -32,29 +32,37 @@ def stage1(text: str, symbol: str = '...') -> str:
 
 user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36'
 
-def get_cookies():
+def get_cookies(user_agent):
     url = 'https://vinted.fr'
-    with sync_playwright() as p:
-        # Démarrer le navigateur
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent=user_agent)
-        
-        # Ouvrir une nouvelle page
-        page = context.new_page()
-        
-        # Naviguer vers l'URL et accepter les cookies si nécessaire
-        page.goto(url)
-        time.sleep(8)
-        
-        cookie_true = stage2(f"Récupération des cookies en cours {Col.pink} {Col.reset}", "!")
-        print(cookie_true.replace('"', '').replace("'", ""))
-        
-        # Vérifier et cliquer sur le bouton d'acceptation des cookies si présent
-        cookie_button_xpath = 'xpath=/html/body/div[43]/div[2]/div/div[1]/div/div[2]/div/button[1]'
-        if page.locator(cookie_button_xpath).is_visible():
-            page.locator(cookie_button_xpath).click()
-            time.sleep(5)
+    try:
+        with sync_playwright() as p:
+            # Démarrer le navigateur
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent=user_agent)
+            
+            # Ouvrir une nouvelle page
+            page = context.new_page()
+            
+            # Naviguer vers l'URL
+            page.goto(url)
+            time.sleep(8)  # Attendre le chargement
+            
+            # Vérifier et cliquer sur le bouton d'acceptation des cookies si présent
+            cookie_button_xpath = 'xpath=/html/body/div[43]/div[2]/div/div[1]/div/div[2]/div/button[1]'
+            if page.locator(cookie_button_xpath).count() > 0:  # Vérifie si l'élément existe
+                if page.locator(cookie_button_xpath).is_visible():
+                    page.locator(cookie_button_xpath).click()
+                    time.sleep(5)
+            
+            # Récupérer les cookies
             cookies = context.cookies()
+            browser.close()  # Fermer le navigateur
+            
+            return cookies
+    
+    except Exception as e:
+        print(f"Une erreur est survenue : {e}")
+        return None
             
 def parse_cookies(cookie_str):
     """
@@ -367,18 +375,47 @@ def oauth(cookies, username, password):
         "grant_type": "password"
     }
     cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies}
-    
     response = requests.post(url, headers=headers, json=data, cookies=cookies_dict)
-    
     if response.status_code == 200:
-        print("Authentification réussie !")
-        print("Headers:", response.json)
+        response_json = response.json()
+        access_token_web = response_json.get("access_token")
+        refresh_token_web = response_json.get("refresh_token")
+        token = (f"access_token_web={access_token_web};refresh_token_web={refresh_token_web};")
+        return token
     else:
-        print(f"Erreur {response.status_code}: {response.reason}")
+        print(f"Erreur {response.status_code}: {response.reason} {url}")
         try:
             print(response.json())
         except ValueError:
             print(response.text)
+    
+def get_v_uid(token):
+    url = 'https://www.vinted.fr/api/v2/users/current'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'fr',
+        'Content-Type': 'application/json',
+        'Referer': 'https://www.vinted.fr/',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    cookies = parse_cookies(token)
+    # Effectuer une requête avec les cookies passés en paramètre
+    response = requests.get(url, headers=headers, cookies=cookies)
+    if response.status_code == 200:
+        # Extraire les cookies
+        cookies = response.cookies.get_dict()
+        
+        # Retourner le v_uid si disponible
+        v_uid = cookies.get('v_uid')
+        if v_uid:
+            return v_uid
+        else:
+            return "v_uid non trouvé dans les cookies."
+    else:
+        # En cas d'erreur HTTP
+        return f"Erreur {response.status_code}: {response.reason}"
 
 def main():
     parser = argparse.ArgumentParser(description="Bots vinted settings.")
@@ -386,8 +423,17 @@ def main():
     args = parser.parse_args()
     filters = load_filters('assets/filters.json')  # Charge les URLs des filtres depuis le fichier
     if args.oauth:
+        cookie_true = stage2(f"Récupération des cookies en cours {Col.pink} {Col.reset}", "!")
+        print(cookie_true.replace('"', '').replace("'", ""))
+        cookies = get_cookies(user_agent)
+        cookie_true = stage2(f"Récupération des cookies effectués {Col.pink} {Col.reset}", "!")
+        print(cookie_true.replace('"', '').replace("'", ""))
         username = input(stage2(f"Veuillez entrer votre identifiant vinted {Col.blue}-> {Col.reset}", "?")).replace('"','').replace("'","")
         password = input(stage2(f"Veuillez entrer votre mots de passe vinted {Col.blue}-> {Col.reset}", "?")).replace('"','').replace("'","")
+        token = oauth(cookies, username, password)
+        v_uid = get_v_uid(token)
+        stats(username, v_uid, token)
+        requests_to_vinted(cookies, filters, token)
     else:
         all_profiles = extract_all_profiles(file_path='assets/auth.json')
         cookie_true = stage2(f"Initialisations des profiles en cours {Col.pink} {Col.reset}", "!")
@@ -395,43 +441,16 @@ def main():
         if all_profiles:
             for profile in all_profiles:
                 stats(profile["name"], profile["v_uid"], profile["token"])
-           
-    url = 'https://vinted.fr'
-    with sync_playwright() as p:
-        # Démarrer le navigateur
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent=user_agent)
-        
-        # Ouvrir une nouvelle page
-        page = context.new_page()
-        
-        # Naviguer vers l'URL et accepter les cookies si nécessaire
-        page.goto(url)
-        time.sleep(8)
-        
-        cookie_true = stage2(f"Récupération des cookies en cours {Col.pink} {Col.reset}", "!")
-        print(cookie_true.replace('"', '').replace("'", ""))
-        
-        # Vérifier et cliquer sur le bouton d'acceptation des cookies si présent
-        cookie_button_xpath = 'xpath=/html/body/div[43]/div[2]/div/div[1]/div/div[2]/div/button[1]'
-        if page.locator(cookie_button_xpath).is_visible():
-            page.locator(cookie_button_xpath).click()
-            time.sleep(5)
-        
         try:
-            cookies = context.cookies()
+            cookie_true = stage2(f"Récupération des cookies en cours {Col.pink} {Col.reset}", "!")
+            print(cookie_true.replace('"', '').replace("'", ""))
+            cookies = get_cookies(user_agent)
             cookie_true = stage2(f"Récupération des cookies effectués {Col.pink} {Col.reset}", "!")
             print(cookie_true.replace('"', '').replace("'", ""))
-            # Début de la vérification continue des nouveaux articles
-            if args.oauth:
-                oauth(cookies,username,password)
             requests_to_vinted(cookies, filters, profile["token"])
         except Exception as e:
             cookie_false = stage(f"Récupération des cookies échouée : {e} {Col.pink} {Col.reset}", "!")
             print(cookie_false.replace('"', '').replace("'", ""))
-
-        # Fermer le navigateur
-        browser.close()
 
 if __name__ == "__main__":
     os.system("cls" if os.name == "nt" else "clear")
