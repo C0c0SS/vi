@@ -6,6 +6,8 @@ from pystyle import *
 import os
 from assets.banner import *
 import datetime
+import re
+import argparse
 
 purple = Col.StaticMIX([Col.blue, Col.purple])
 def stage2(text: str, symbol: str = '...') -> str:
@@ -30,6 +32,30 @@ def stage1(text: str, symbol: str = '...') -> str:
 
 user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36'
 
+def get_cookies():
+    url = 'https://vinted.fr'
+    with sync_playwright() as p:
+        # Démarrer le navigateur
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(user_agent=user_agent)
+        
+        # Ouvrir une nouvelle page
+        page = context.new_page()
+        
+        # Naviguer vers l'URL et accepter les cookies si nécessaire
+        page.goto(url)
+        time.sleep(8)
+        
+        cookie_true = stage2(f"Récupération des cookies en cours {Col.pink} {Col.reset}", "!")
+        print(cookie_true.replace('"', '').replace("'", ""))
+        
+        # Vérifier et cliquer sur le bouton d'acceptation des cookies si présent
+        cookie_button_xpath = 'xpath=/html/body/div[43]/div[2]/div/div[1]/div/div[2]/div/button[1]'
+        if page.locator(cookie_button_xpath).is_visible():
+            page.locator(cookie_button_xpath).click()
+            time.sleep(5)
+            cookies = context.cookies()
+            
 def parse_cookies(cookie_str):
     """
     Convertit une chaîne de cookies au format `clé=valeur; clé=valeur; ...` en un dictionnaire Python.
@@ -141,12 +167,6 @@ def check_new_items(url, cookies, seen_items_list, filter_name, token):
                             get_transaction_id(new_item["id"], token)
             except json.JSONDecodeError:
                 print(f"[ERREUR] Décodage JSON échoué pour le filtre : {filter_name}")
-        elif response.status_code == 429:
-            rate_limited_print = stage(f"Vous êtes temporairement limité en raisons d un grands nombres de requêtes ! {Col.pink} {Col.reset}", "!")
-            print(rate_limited_print.replace('"', '').replace("'", "")) 
-            proxy_print = stage(f"Veuillez utiliser des proxys !{Col.pink} {Col.reset}", "!")
-            print(proxy_print.replace('"', '').replace("'", ""))  
-            
         else:
             print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
             print(response.text)
@@ -174,50 +194,96 @@ def requests_to_vinted(cookies, filters, token):
         time.sleep(0.5)  # Pause avant de re-parcourir tous les filtres
 
 def stats(name, v_uid, token):
-    """
-    Fonction pour récupérer les statistiques d'un utilisateur Vinted via l'API.
-
-    :param access_token: Le token d'accès pour l'authentification.
-    :param name: Nom de l'utilisateur.
-    :param v_uid: L'identifiant unique de l'utilisateur.
-    """
-    url = f'https://www.vinted.fr/api/v2/users/{v_uid}/stats'
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'fr',
-        'Content-Type': 'application/json',
-        'Referer': 'https://www.vinted.fr/catalog',
-        'X-Requested-With': 'XMLHttpRequest'
-    }
+    base_url = "https://www.vinted.fr/api/v2/"
+    
+    def get_headers(referer_url):
+        """Génère des en-têtes HTTP communs."""
+        return {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'fr',
+            'Content-Type': 'application/json',
+            'Referer': referer_url,
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    
     cookies = parse_cookies(token)
+    
     try:
-        # Envoi de la requête GET avec cookies et en-têtes
-        response = requests.get(url, headers=headers, cookies=cookies)
+        # Récupération des statistiques utilisateur
+        stats_url = f'{base_url}users/{v_uid}/stats'
+        stats_response = requests.get(stats_url, headers=get_headers("https://www.vinted.fr/catalog"), cookies=cookies)
 
-        # Vérifier si la requête a réussi
-        if response.status_code == 200:
+        if stats_response.status_code == 200:
             try:
-                response_json = response.json()
-                wallet_balance = response_json.get("stats", {}).get("wallet_balance")
-                wallet_balance_currency = response_json.get("stats", {}).get("wallet_balance_currency")
-                wallet_balance_print = stage2(f"{name}, Porte monnaie : {wallet_balance} {wallet_balance_currency} ", "Profils")
-                print(wallet_balance_print.replace('"', '').replace("'", ""))
-                if float(wallet_balance) == 0.0 :
-                    wallet_balance_0 = stage(f"Le porte monnaie ne contient pas d' argent {Col.pink} {Col.reset}", "!")
-                    print(wallet_balance_0.replace('"', '').replace("'", ""))  
-                     
+                stats_json = stats_response.json()
+                stats = stats_json.get("stats", {})
+                wallet_balance = stats.get("wallet_balance", 0.0)
+                wallet_currency = stats.get("wallet_balance_currency", "EUR")
+
+                wallet_msg = stage2(f"{name}, Porte-monnaie : {wallet_balance} {wallet_currency}", "Profils")
+                print(wallet_msg.replace('"', '').replace("'", ""))
+
+                if float(wallet_balance) == 0.0:
+                    # Vérification des moyens de paiement
+                    payment_url = f'{base_url}payments/credit_cards'
+                    payment_response = requests.get(payment_url, headers=get_headers("https://www.vinted.fr/settings/payments"), cookies=cookies)
+
+                    if payment_response.status_code == 200:
+                        try:
+                            payment_json = payment_response.json()
+                            if not payment_json.get("cards"):
+                                payment_msg = stage(f"{name}, Aucun moyen de paiement disponible {Col.pink} {Col.reset}", "Profils")
+                                print(payment_msg.replace('"', '').replace("'", ""))   
+                            else:
+                                payment_msg = stage2(f"{name}, Carte bancaire disponible {Col.pink} {Col.reset}", "Profils")
+                                print(payment_msg.replace('"', '').replace("'", ""))
+                        except json.JSONDecodeError:
+                            print("Erreur: La réponse des moyens de paiement n'est pas un JSON valide.")
+
+                # Vérification de l'adresse de livraison par défaut
+                address_url = f'{base_url}user_addresses/default_shipping_address'
+                address_response = requests.get(address_url, headers=get_headers("https://www.vinted.fr/settings/shipping"), cookies=cookies)
+
+                if address_response.status_code == 200:
+                    try:
+                        address_json = address_response.json()
+                        if "user_address" in address_json:
+                            address_msg = stage2(f"{name}, Adresse de facturation disponible {Col.pink} {Col.reset}", "Profils")
+                            print(address_msg.replace('"', '').replace("'", ""))
+                        else:
+                            address_msg = stage(f"{name}, Adresse de facturation indisponible {Col.pink} {Col.reset}", "Profils")
+                            print(address_msg.replace('"', '').replace("'", ""))
+                    except json.JSONDecodeError:
+                        print("Erreur: La réponse de l'adresse n'est pas un JSON valide.")
+
+                phone_url = f'{base_url}users/{v_uid}/security'
+                phone_response = requests.get(phone_url, headers=get_headers("https://www.vinted.fr/settings/account"), cookies=cookies)
+
+                if phone_response.status_code == 200:
+                    try:
+                        phone_json = phone_response.json()
+                        masked_phone_number = phone_json.get("security", {}).get("masked_phone_number")
+                        if masked_phone_number is None:
+                            phone_msg = stage(f"{name}, Numéro de téléphone indisponible {Col.pink} {Col.reset}", "Profils")
+                            print(phone_msg.replace('"', '').replace("'", ""))
+                        elif masked_phone_number == "null":
+                            phone_msg = stage(f"{name}, Numéro de téléphone indisponible {Col.pink} {Col.reset}", "Profils")
+                            print(phone_msg.replace('"', '').replace("'", ""))
+                        else:
+                            phone_msg = stage2(f"{name}, Numéro de téléphone disponible {Col.pink} {Col.reset}", "Profils")
+                            print(phone_msg.replace('"', '').replace("'", ""))
+                    except json.JSONDecodeError:
+                        print("Erreur: La réponse de l'adresse n'est pas un JSON valide.")                            
             except json.JSONDecodeError:
-                print("Erreur lors du décodage JSON.")
-        elif response.status_code == 401:
-            token_print = stage(f"Le Jeton d'authentification est invalide {Col.pink} {Col.reset}", "!")
-            print(token_print.replace('"', '').replace("'", ""))  
+                print("Erreur lors du décodage JSON des statistiques.")
+        elif stats_response.status_code == 401:
+            print(stage(f"{name}, Le jeton d-authentification est invalide {Col.pink} {Col.reset}", "Profils").replace('"', '').replace("'", ""))
         else:
-            print(f"Erreur dans la requête GET pour l'URL {url}. Statut : {response.status_code}")
-            print(response.text)
+            print(f"Erreur dans la requête GET pour {stats_url}. Statut : {stats_response.status_code}")
     except requests.RequestException as e:
-        print(f"Erreur lors de la requête pour l'URL {url}: {e}")
+        print(f"Erreur réseau lors de la requête pour {stats_url}: {e}")
 
 def get_transaction_id(item_id, token):
     url = f'https://www.vinted.fr/transaction/buy/new?source_screen=item&transaction%5Bitem_id%5D={item_id}'
@@ -240,18 +306,96 @@ def get_transaction_id(item_id, token):
                 transaction_part = internal_url.split('checkout?transaction_id=')[-1]
                 transaction_print = stage3(f"Transaction id récupérer avec succés ! {Col.pink} {Col.reset}", transaction_part)
                 print(transaction_print.replace('"', '').replace("'", ""))
+                checkout(transaction_part, token)
+
+    elif response.status_code == 307:
+        transaction_print = stage(f"Le Jeton d-authentification est invalide {Col.pink} {Col.reset}", "Transaction")
+        print(transaction_print.replace('"', '').replace("'", "")) 
+    elif response.status_code == 500:
+        transaction_print = stage(f"Une erreur s'est produite {Col.pink} {Col.reset}", "Transaction")
+        print(transaction_print.replace('"', '').replace("'", "")) 
     else : 
         print(f"[ERREUR] Requête échouée pour l'URL {url}. Statut : {response.status_code}")
         print(response.json)
     
+def checkout(transaction_part, token):
+    url = f'https://www.vinted.fr/api/v2/transactions/{transaction_part}/checkout'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'fr',
+        'Content-Type': 'application/json',
+        'Referer': 'https://www.vinted.fr/catalog',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    cookies = parse_cookies(token)
+    # Envoi de la requête GET avec suivi des redirections désactivé
+    response = requests.get(url, headers=headers, cookies=cookies, allow_redirects=False)
+    if response.status_code == 200:
+        # Obtenir le texte brut de la réponse
+        response_text = response.text
+        # Expression régulière pour trouver le checksum
+        checksum_match = re.search(r'"checksum"\s*:\s*"([a-fA-F0-9]{32})"', response_text)
+        
+        if checksum_match:
+            # Récupère le checksum depuis le premier groupe capturé
+            checksum = checksum_match.group(1)
+            print("Checksum trouvé :", checksum)
+        else:
+            print("Checksum introuvable dans la réponse.")
+    else:
+        print(f"Erreur : Statut HTTP {response.status_code}")
+
+def oauth(cookies, username, password):
+    url = 'https://www.vinted.fr/web/api/auth/oauth'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'fr',
+        'Content-Type': 'application/json',
+        'Referer': 'https://www.vinted.fr/',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    data = {
+        "client_id": "web",
+        "scope": "user",
+        "fingerprint": "63a76e4155c1bddd2f56a163d39c9684",
+        "username": username,
+        "password": password,
+        "grant_type": "password"
+    }
+    cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+    
+    response = requests.post(url, headers=headers, json=data, cookies=cookies_dict)
+    
+    if response.status_code == 200:
+        print("Authentification réussie !")
+        print("Headers:", response.json)
+    else:
+        print(f"Erreur {response.status_code}: {response.reason}")
+        try:
+            print(response.json())
+        except ValueError:
+            print(response.text)
+
 def main():
+    parser = argparse.ArgumentParser(description="Bots vinted settings.")
+    parser.add_argument('-o', '--oauth', action='store_true', help="Connexion Vinted avec mots de passe et identifiant")
+    args = parser.parse_args()
     filters = load_filters('assets/filters.json')  # Charge les URLs des filtres depuis le fichier
-    all_profiles = extract_all_profiles(file_path='assets/auth.json')
-    cookie_true = stage2(f"Initialisations des profiles en cours {Col.pink} {Col.reset}", "!")
-    print(cookie_true.replace('"', '').replace("'", ""))
-    if all_profiles:
-        for profile in all_profiles:
-           stats(profile["name"], profile["v_uid"], profile["token"])
+    if args.oauth:
+        username = input(stage2(f"Veuillez entrer votre identifiant vinted {Col.blue}-> {Col.reset}", "?")).replace('"','').replace("'","")
+        password = input(stage2(f"Veuillez entrer votre mots de passe vinted {Col.blue}-> {Col.reset}", "?")).replace('"','').replace("'","")
+    else:
+        all_profiles = extract_all_profiles(file_path='assets/auth.json')
+        cookie_true = stage2(f"Initialisations des profiles en cours {Col.pink} {Col.reset}", "!")
+        print(cookie_true.replace('"', '').replace("'", ""))
+        if all_profiles:
+            for profile in all_profiles:
+                stats(profile["name"], profile["v_uid"], profile["token"])
+           
     url = 'https://vinted.fr'
     with sync_playwright() as p:
         # Démarrer le navigateur
@@ -279,6 +423,8 @@ def main():
             cookie_true = stage2(f"Récupération des cookies effectués {Col.pink} {Col.reset}", "!")
             print(cookie_true.replace('"', '').replace("'", ""))
             # Début de la vérification continue des nouveaux articles
+            if args.oauth:
+                oauth(cookies,username,password)
             requests_to_vinted(cookies, filters, profile["token"])
         except Exception as e:
             cookie_false = stage(f"Récupération des cookies échouée : {e} {Col.pink} {Col.reset}", "!")
